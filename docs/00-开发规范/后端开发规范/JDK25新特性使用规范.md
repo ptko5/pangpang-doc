@@ -1,0 +1,540 @@
+# JDK25新特性使用规范
+
+## 1. 文档说明
+
+| 属性 | 说明 |
+|------|------|
+| 文档版本 | V1.0 |
+| 生效日期 | 2026-06-30 |
+| 适用范围 | 公司所有后端开发团队 |
+| 作者 | 架构组 |
+
+---
+
+## 2. 虚拟线程（Virtual Threads）
+
+### 2.1 概述
+
+虚拟线程（JEP 462）是JDK 21引入并在JDK 25中稳定的轻量级线程实现，相比传统平台线程具有以下优势：
+- **轻量级**：虚拟线程栈可以动态增长和收缩，内存占用远小于平台线程
+- **高并发**：单个JVM可以支持数百万虚拟线程
+- **简化编程**：使用同步代码编写异步逻辑
+
+### 2.2 使用规范
+
+#### 【强制】虚拟线程适用场景
+
+| 场景 | 是否适用 | 说明 |
+|------|---------|------|
+| IO密集型任务 | ✅ 强烈推荐 | 文件读写、网络请求、数据库查询 |
+| 阻塞等待场景 | ✅ 强烈推荐 | 等待外部系统响应、消息队列消费 |
+| CPU密集型任务 | ❌ 不推荐 | 虚拟线程不适合计算密集型工作 |
+| 长时间持有锁 | ⚠️ 谨慎使用 | 可能导致载体线程被长期占用 |
+
+#### 【强制】虚拟线程创建方式
+
+```java
+// 方式1：使用 Executors.newVirtualThreadPerTaskExecutor()（推荐）
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    executor.submit(this::processFileUpload);
+}
+
+// 方式2：使用 Thread.startVirtualThread()
+Thread.startVirtualThread(this::processMessage);
+
+// 方式3：使用 Thread.ofVirtual() 构建器
+Thread vThread = Thread.ofVirtual()
+    .name("order-process-" + orderId)
+    .unstarted(this::processOrder);
+vThread.start();
+```
+
+#### 【强制】虚拟线程命名规范
+
+虚拟线程必须命名，便于问题排查和监控：
+
+```java
+// ✅ 正确：使用有意义的命名
+Thread.ofVirtual()
+    .name("user-import-" + batchId)
+    .start(this::importUsers);
+
+// ❌ 错误：未命名虚拟线程
+Thread.startVirtualThread(this::importUsers);
+```
+
+#### 【禁止】虚拟线程使用禁忌
+
+| 禁忌场景 | 原因 |
+|---------|------|
+| 使用 `ThreadLocal` 存储大量数据 | 虚拟线程数量巨大，可能导致内存溢出 |
+| 长时间持有锁 | 可能导致载体线程饥饿 |
+| 使用 `synchronized` 同步块过长 | 阻塞载体线程，影响吞吐量 |
+| 调用 `Thread.sleep()` 在循环中 | 应使用虚拟线程友好的等待机制 |
+| 强制停止虚拟线程 | 使用 `Thread.stop()` 已废弃，应使用中断机制 |
+
+#### 【推荐】虚拟线程最佳实践
+
+```java
+// 使用虚拟线程处理批量IO任务
+public CompletionStage<List<UserResponse>> batchQueryUsers(List<Long> userIds) {
+    ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    
+    List<CompletableFuture<UserResponse>> futures = userIds.stream()
+        .map(id -> CompletableFuture.supplyAsync(() -> userMapper.selectById(id), executor)
+            .thenApply(UserConverter::toResponse))
+        .toList();
+    
+    return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+        .thenApply(v -> futures.stream()
+            .map(CompletableFuture::join)
+            .toList());
+}
+
+// 使用虚拟线程消费消息队列
+@PostConstruct
+public void startMessageConsumer() {
+    Thread.startVirtualThread(() -> {
+        while (!Thread.currentThread().isInterrupted()) {
+            Message message = messageQueue.receive();
+            processMessage(message);
+        }
+    });
+}
+```
+
+---
+
+## 3. Record类
+
+### 3.1 概述
+
+Record（JEP 395）是JDK 14引入的不可变数据载体类，自动生成：
+- `equals()` / `hashCode()` 方法
+- `toString()` 方法
+- 所有字段的访问器方法（不带 `get` 前缀）
+- 紧凑构造函数
+
+### 3.2 使用规范
+
+#### 【强制】Record适用场景
+
+| 场景 | 是否适用 | 说明 |
+|------|---------|------|
+| Request/Query/Response数据传输对象 | ✅ 强烈推荐 | 不可变数据载体 |
+| 配置参数对象 | ✅ 推荐 | 不可变配置 |
+| 中间计算结果 | ✅ 推荐 | 不可变快照 |
+| 需要继承的类 | ❌ 不适用 | Record不能继承其他类 |
+| 需要可变字段的类 | ❌ 不适用 | Record字段默认final |
+| 实体类（Entity） | ❌ 不适用 | 需要setter和继承 |
+
+#### 【强制】Record命名规范
+
+- Record类名使用 **大驼峰**
+- 使用 `Record` 后缀或保持业务语义
+- 字段名使用 **小驼峰**
+
+#### ✅ 正确示例
+
+```java
+// Request - 推荐使用Record
+public record CreateUserRequest(
+    @NotBlank(message = "用户名不能为空") String username,
+    @NotBlank(message = "邮箱不能为空") @Email String email,
+    @NotBlank(message = "密码不能为空") @Size(min = 6, max = 20) String password
+) {}
+
+// Response - 推荐使用Record
+public record UserResponse(
+    Long id,
+    String username,
+    String email,
+    UserStatusEnum status,
+    LocalDateTime createdAt
+) {}
+
+// 中间结果 - 推荐使用Record
+public record PageResult<T>(
+    List<T> data,
+    Long total,
+    Integer pageNum,
+    Integer pageSize
+) {}
+
+// 查询参数 - 推荐使用Record
+public record UserQuery(
+    String username,
+    String email,
+    UserStatusEnum status,
+    Integer pageNum,
+    Integer pageSize
+) {}
+```
+
+#### ❌ 错误示例
+
+```java
+// 错误：使用Record作为实体类（需要setter）
+public record UserEntity(
+    Long id,
+    String username,
+    String password
+) {}
+
+// 错误：使用Record需要继承的场景
+public record CustomException(String message) extends RuntimeException { }
+```
+
+#### 【推荐】Record自定义方法
+
+Record可以添加自定义方法，但应保持简洁：
+
+```java
+public record PageResult<T>(List<T> data, Long total, Integer pageNum, Integer pageSize) {
+    
+    public boolean hasMore() {
+        return pageNum * pageSize < total;
+    }
+    
+    public Integer getTotalPages() {
+        return (int) Math.ceil((double) total / pageSize);
+    }
+}
+```
+
+---
+
+## 4. 密封类（Sealed Classes）
+
+### 4.1 概述
+
+密封类（JEP 409）允许类或接口限制哪些其他类或接口可以扩展或实现它们，提供更好的类型安全性。
+
+### 4.2 使用规范
+
+#### 【强制】密封类适用场景
+
+| 场景 | 是否适用 | 说明 |
+|------|---------|------|
+| 枚举扩展 | ✅ 强烈推荐 | 需要更多灵活性的枚举场景 |
+| 表达式类型层次 | ✅ 推荐 | 编译器可穷尽检查 |
+| 状态模式 | ✅ 推荐 | 有限的状态集合 |
+| 异常类型层次 | ✅ 推荐 | 明确的异常分类 |
+| 公开API的扩展性 | ❌ 不适用 | 限制了外部扩展 |
+
+#### 【强制】密封类定义
+
+```java
+// 密封接口
+public sealed interface PaymentMethod permits CreditCard, DebitCard, Alipay, WeChatPay {
+    BigDecimal calculateFee(BigDecimal amount);
+}
+
+// 密封类
+public sealed class OrderStatus permits Pending, Paid, Shipped, Completed, Cancelled {
+    protected final String status;
+    
+    protected OrderStatus(String status) {
+        this.status = status;
+    }
+    
+    public String getStatus() {
+        return status;
+    }
+}
+
+// 实现类必须使用 final 或 sealed
+public final class CreditCard implements PaymentMethod {
+    @Override
+    public BigDecimal calculateFee(BigDecimal amount) {
+        return amount.multiply(new BigDecimal("0.01"));
+    }
+}
+
+public final class Pending extends OrderStatus {
+    public Pending() {
+        super("PENDING");
+    }
+}
+```
+
+#### 【推荐】密封类与switch模式匹配结合
+
+密封类与模式匹配结合使用时，编译器可以进行穷尽性检查：
+
+```java
+// 使用模式匹配处理密封类，编译器检查是否穷尽所有子类
+public String getStatusDescription(OrderStatus status) {
+    return switch (status) {
+        case Pending p -> "待付款";
+        case Paid p -> "已付款";
+        case Shipped s -> "已发货";
+        case Completed c -> "已完成";
+        case Cancelled c -> "已取消";
+    };
+}
+```
+
+---
+
+## 5. 模式匹配（Pattern Matching）
+
+### 5.1 概述
+
+模式匹配（JEP 441）允许在条件语句中直接检查类型并提取数据，减少样板代码。
+
+### 5.2 使用规范
+
+#### 【强制】instanceof模式匹配
+
+```java
+// ✅ 正确：使用模式匹配，直接获取变量
+if (obj instanceof String s && !s.isEmpty()) {
+    processString(s);
+}
+
+// ❌ 错误：传统方式，需要类型转换
+if (obj instanceof String) {
+    String s = (String) obj;
+    if (!s.isEmpty()) {
+        processString(s);
+    }
+}
+```
+
+#### 【强制】switch模式匹配
+
+```java
+// ✅ 正确：使用switch模式匹配
+public Object processValue(Object value) {
+    return switch (value) {
+        case null -> "null";
+        case String s -> "String: " + s.length();
+        case Integer i -> "Integer: " + i;
+        case List<?> list -> "List: " + list.size();
+        default -> "Unknown: " + value.getClass().getName();
+    };
+}
+
+// ✅ 正确：带条件的模式匹配
+public String formatNumber(Object number) {
+    return switch (number) {
+        case Integer i when i > 1000 -> String.format("%,d", i);
+        case Integer i -> String.valueOf(i);
+        case Double d when d > 1000 -> String.format("%,.2f", d);
+        case Double d -> String.valueOf(d);
+        default -> "N/A";
+    };
+}
+```
+
+#### 【推荐】record模式匹配
+
+```java
+// ✅ 正确：使用record模式匹配提取字段
+public String formatUser(UserResponse user) {
+    return switch (user) {
+        case UserResponse(Long id, String name, String email, var status, var createdAt) ->
+            String.format("User[%d]: %s (%s)", id, name, email);
+    };
+}
+
+// ✅ 正确：嵌套record模式匹配
+public String formatOrder(OrderResponse order) {
+    return switch (order) {
+        case OrderResponse(Long id, UserResponse(Long userId, String userName, ..), BigDecimal amount) ->
+            String.format("Order[%d] by %s: %s", id, userName, amount);
+    };
+}
+```
+
+---
+
+## 6. 文本块（Text Blocks）
+
+### 6.1 概述
+
+文本块（JEP 378）允许编写多行字符串，避免转义字符，提高代码可读性。
+
+### 6.2 使用规范
+
+#### 【强制】文本块适用场景
+
+| 场景 | 是否适用 | 说明 |
+|------|---------|------|
+| SQL语句 | ✅ 强烈推荐 | 多行SQL更易读 |
+| JSON字符串 | ✅ 推荐 | 结构化数据 |
+| XML/HTML模板 | ✅ 推荐 | 标记语言 |
+| 错误消息 | ✅ 推荐 | 多行描述 |
+| 短字符串 | ❌ 不适用 | 使用普通字符串即可 |
+
+#### ✅ 正确示例
+
+```java
+// SQL语句 - 推荐使用文本块
+String sql = """
+    SELECT u.id, u.username, u.email, u.created_at
+    FROM user u
+    WHERE u.status = 1
+      AND u.created_at >= ?
+    ORDER BY u.created_at DESC
+    LIMIT ? OFFSET ?
+    """;
+
+// JSON字符串 - 推荐使用文本块
+String json = """
+    {
+        "code": 200,
+        "message": "success",
+        "data": {
+            "id": 1,
+            "name": "test"
+        }
+    }
+    """;
+
+// XML模板 - 推荐使用文本块
+String xml = """
+    <response>
+        <code>200</code>
+        <message>success</message>
+    </response>
+    """;
+```
+
+#### ❌ 错误示例
+
+```java
+// 错误：使用字符串拼接多行SQL
+String sql = "SELECT u.id, u.username, u.email " +
+             "FROM user u " +
+             "WHERE u.status = 1";
+
+// 错误：使用转义字符
+String json = "{\"code\":200,\"message\":\"success\"}";
+```
+
+---
+
+## 7. 接口中的私有方法
+
+### 7.1 概述
+
+JDK 9+ 允许接口中定义私有方法，用于抽取公共逻辑，避免代码重复。
+
+### 7.2 使用规范
+
+#### 【推荐】接口私有方法使用
+
+```java
+public interface DataValidator {
+    
+    default boolean validateEmail(String email) {
+        return isNotEmpty(email) && matchesPattern(email, "^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$");
+    }
+    
+    default boolean validatePhone(String phone) {
+        return isNotEmpty(phone) && matchesPattern(phone, "^1[3-9]\\d{9}$");
+    }
+    
+    private boolean isNotEmpty(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+    
+    private boolean matchesPattern(String value, String pattern) {
+        return value.matches(pattern);
+    }
+}
+```
+
+---
+
+## 8. JDK25模块化规范
+
+### 8.1 模块声明
+
+#### 【强制】模块命名规范
+
+模块名使用小写英文，与包名保持一致：
+
+```java
+// module-info.java
+module com.example.user {
+    requires spring.context;
+    requires spring.web;
+    requires com.example.common;
+    
+    exports com.example.user.controller;
+    exports com.example.user.dto;
+    
+    opens com.example.user.entity to spring.orm;
+}
+```
+
+#### 【推荐】模块依赖管理
+
+| 指令 | 说明 |
+|------|------|
+| `requires` | 声明依赖其他模块 |
+| `requires transitive` | 传递依赖，导出给下游模块 |
+| `exports` | 导出包，允许其他模块访问 |
+| `opens` | 开放包，允许反射访问 |
+| `provides` / `uses` | 服务提供/消费 |
+
+---
+
+## 9. JDK25兼容性注意事项
+
+### 9.1 废弃API处理
+
+#### 【强制】禁止使用废弃API
+
+| 废弃API | 替代方案 |
+|---------|---------|
+| `java.lang.Thread.stop()` | 使用中断机制 |
+| `java.lang.Thread.suspend()` | 使用等待/通知机制 |
+| `java.lang.Thread.resume()` | 使用等待/通知机制 |
+| `java.util.Date` | 使用 `java.time.LocalDateTime` |
+| `java.util.Calendar` | 使用 `java.time.LocalDate` / `java.time.LocalTime` |
+| `java.sql.Timestamp` | 使用 `java.time.Instant` |
+
+### 9.2 新特性兼容性
+
+#### 【推荐】Java版本检测
+
+在需要兼容多版本的场景下，使用版本检测：
+
+```java
+// 检测是否支持虚拟线程（JDK 21+）
+public boolean supportsVirtualThreads() {
+    try {
+        Class.forName("java.lang.VirtualThread");
+        return true;
+    } catch (ClassNotFoundException e) {
+        return false;
+    }
+}
+```
+
+---
+
+## 10. 落地检查清单
+
+| 序号 | 检查项 | 检查方式 | 责任人 |
+|------|--------|---------|--------|
+| 1 | IO密集型任务是否使用虚拟线程 | 检查代码 | 开发人员 |
+| 2 | 虚拟线程是否正确命名 | 检查代码 | 开发人员 |
+| 3 | 是否在虚拟线程中使用ThreadLocal存储大量数据 | 检查代码 | 代码评审人 |
+| 4 | Request/Query/Response是否使用Record | 检查代码 | 开发人员 |
+| 5 | 是否使用Record作为需要可变字段的类 | 检查代码 | 代码评审人 |
+| 6 | 有限类型层次是否使用密封类 | 检查代码 | 架构师 |
+| 7 | instanceof是否使用模式匹配 | 检查代码 | 开发人员 |
+| 8 | 多行字符串是否使用文本块 | 检查代码 | 开发人员 |
+| 9 | 是否使用废弃API（Thread.stop等） | SonarQube扫描 | 代码评审人 |
+| 10 | module-info.java是否正确配置 | 检查代码 | 架构师 |
+
+---
+
+**文档结束**
+
+*本规范由架构组制定，解释权归架构组所有。*

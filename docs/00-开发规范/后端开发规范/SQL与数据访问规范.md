@@ -1,0 +1,637 @@
+# SQL与数据访问规范
+
+## 1. 文档说明
+
+| 属性 | 说明 |
+|------|------|
+| 文档版本 | V1.0 |
+| 生效日期 | 2026-06-30 |
+| 适用范围 | 公司所有后端开发团队 |
+| 作者 | 架构组 |
+
+---
+
+## 2. SQL编写规范
+
+### 2.1 SQL格式规范
+
+#### 【强制】SQL语句格式
+
+```sql
+-- ✅ 正确：关键字大写，字段小写，缩进清晰
+SELECT 
+    u.id, 
+    u.username, 
+    u.email, 
+    u.created_at
+FROM user u
+WHERE 
+    u.status = 1
+    AND u.created_at >= '2026-01-01'
+ORDER BY u.created_at DESC
+LIMIT 10 OFFSET 0;
+
+-- ✅ 正确：INSERT语句格式
+INSERT INTO user (
+    username, 
+    email, 
+    password, 
+    status, 
+    created_at, 
+    updated_at
+) VALUES (
+    'test_user', 
+    'test@example.com', 
+    'encrypted_password', 
+    1, 
+    NOW(), 
+    NOW()
+);
+
+-- ✅ 正确：UPDATE语句格式
+UPDATE user 
+SET 
+    email = 'new_email@example.com', 
+    updated_at = NOW()
+WHERE id = 1;
+
+-- ✅ 正确：DELETE语句格式
+DELETE FROM user 
+WHERE id = 1;
+```
+
+#### 【强制】关键字大写
+
+| 关键字 | 说明 |
+|--------|------|
+| `SELECT` | 查询 |
+| `FROM` | 表来源 |
+| `WHERE` | 条件 |
+| `AND` | 与条件 |
+| `OR` | 或条件 |
+| `ORDER BY` | 排序 |
+| `GROUP BY` | 分组 |
+| `HAVING` | 分组条件 |
+| `LIMIT` | 限制 |
+| `INSERT` | 插入 |
+| `UPDATE` | 更新 |
+| `DELETE` | 删除 |
+
+#### 【推荐】表别名规范
+
+- 表别名使用 **单个小写字母** 或 **表名缩写**
+- 别名应 **见名知意**
+
+```sql
+-- ✅ 正确：使用有意义的别名
+SELECT u.id, u.username, o.order_no
+FROM user u
+LEFT JOIN `order` o ON u.id = o.user_id;
+
+-- ❌ 错误：使用无意义的别名
+SELECT a.id, a.username, b.order_no
+FROM user a
+LEFT JOIN `order` b ON a.id = b.user_id;
+```
+
+### 2.2 SQL安全规范
+
+#### 【强制】禁止SQL注入
+
+| 方式 | 是否安全 | 说明 |
+|------|---------|------|
+| **预编译语句（PreparedStatement）** | ✅ 安全 | 推荐使用 |
+| **MyBatis参数占位符** | ✅ 安全 | `#{param}` |
+| **字符串拼接** | ❌ 危险 | 禁止使用 |
+| **字符串格式化** | ❌ 危险 | 禁止使用 |
+
+#### ✅ 正确示例
+
+```java
+// MyBatis XML - 使用参数占位符
+<select id="getUserByUsername" resultType="UserEntity">
+    SELECT id, username, email
+    FROM user
+    WHERE username = #{username}
+</select>
+
+// MyBatis注解 - 使用参数占位符
+@Select("SELECT id, username, email FROM user WHERE username = #{username}")
+UserEntity getUserByUsername(@Param("username") String username);
+
+// 动态SQL - 使用MyBatis动态标签
+<select id="listUsers" resultType="UserEntity">
+    SELECT id, username, email
+    FROM user
+    WHERE 1=1
+    <if test="username != null">
+        AND username LIKE CONCAT('%', #{username}, '%')
+    </if>
+    <if test="status != null">
+        AND status = #{status}
+    </if>
+</select>
+```
+
+#### ❌ 错误示例
+
+```java
+// 错误：字符串拼接，存在SQL注入风险
+String sql = "SELECT * FROM user WHERE username = '" + username + "'";
+
+// 错误：字符串格式化，存在SQL注入风险
+String sql = String.format("SELECT * FROM user WHERE username = '%s'", username);
+```
+
+#### 【强制】禁止SELECT *
+
+```sql
+-- ✅ 正确：明确指定字段
+SELECT id, username, email FROM user;
+
+-- ❌ 错误：使用SELECT *
+SELECT * FROM user;
+```
+
+### 2.3 SQL性能规范
+
+#### 【强制】索引使用
+
+| 场景 | 是否需要索引 | 说明 |
+|------|-------------|------|
+| WHERE条件字段 | ✅ 需要 | 加速查询过滤 |
+| ORDER BY字段 | ✅ 需要 | 避免排序开销 |
+| JOIN关联字段 | ✅ 需要 | 加速关联查询 |
+| GROUP BY字段 | ✅ 需要 | 加速分组 |
+| 高基数字段 | ✅ 需要 | 区分度高的字段 |
+| 低基数字段 | ❌ 不需要 | 区分度低，索引效果差 |
+
+#### 【强制】分页查询规范
+
+```sql
+-- ✅ 正确：使用主键分页，避免OFFSET性能问题
+SELECT id, username, email
+FROM user
+WHERE id > #{lastId}
+ORDER BY id ASC
+LIMIT 10;
+
+-- ✅ 正确：使用LIMIT OFFSET（适用于小偏移量）
+SELECT id, username, email
+FROM user
+WHERE status = 1
+ORDER BY created_at DESC
+LIMIT #{pageSize} OFFSET #{offset};
+
+-- ❌ 错误：OFFSET过大，性能差
+SELECT id, username, email
+FROM user
+ORDER BY created_at DESC
+LIMIT 10 OFFSET 100000;
+```
+
+#### 【禁止】全表扫描操作
+
+| 操作 | 风险 | 替代方案 |
+|------|------|---------|
+| `SELECT * FROM large_table` | 全表扫描 | 限制字段和行数 |
+| `DELETE FROM table` | 全表删除 | 添加WHERE条件 |
+| `UPDATE table SET col = val` | 全表更新 | 添加WHERE条件 |
+
+#### 【推荐】批量操作规范
+
+```sql
+-- ✅ 正确：批量INSERT
+INSERT INTO user (username, email, created_at)
+VALUES 
+    ('user1', 'user1@example.com', NOW()),
+    ('user2', 'user2@example.com', NOW()),
+    ('user3', 'user3@example.com', NOW());
+
+-- ✅ 正确：批量UPDATE
+UPDATE user 
+SET status = CASE id
+    WHEN 1 THEN 0
+    WHEN 2 THEN 0
+    WHEN 3 THEN 1
+END
+WHERE id IN (1, 2, 3);
+
+-- ✅ 正确：批量DELETE
+DELETE FROM user WHERE id IN (1, 2, 3);
+```
+
+---
+
+## 3. 数据访问层规范
+
+### 3.1 Mapper接口规范
+
+#### 【强制】Mapper命名规范
+
+| 操作类型 | 前缀 | 示例 |
+|---------|------|------|
+| 查询单个 | `selectById` / `selectOne` | `selectById(Long id)` |
+| 查询列表 | `selectList` / `selectPage` | `selectList(UserQuery query)` |
+| 新增 | `insert` | `insert(UserEntity user)` |
+| 更新 | `updateById` / `updateSelective` | `updateById(UserEntity user)` |
+| 删除 | `deleteById` / `deleteBatch` | `deleteById(Long id)` |
+| 统计 | `selectCount` | `selectCount(UserQuery query)` |
+| 检查存在 | `existsBy` | `existsByEmail(String email)` |
+
+#### ✅ 正确示例
+
+```java
+@Mapper
+public interface UserMapper {
+    
+    UserEntity selectById(Long id);
+    
+    UserEntity selectByEmail(String email);
+    
+    List<UserEntity> selectList(UserQuery query);
+    
+    PageResult<UserEntity> selectPage(UserQuery query);
+    
+    int insert(UserEntity user);
+    
+    int updateById(UserEntity user);
+    
+    int updateSelective(UserEntity user);
+    
+    int deleteById(Long id);
+    
+    int deleteBatch(List<Long> ids);
+    
+    int selectCount(UserQuery query);
+    
+    boolean existsByEmail(String email);
+}
+```
+
+### 3.2 MyBatis XML规范
+
+#### 【强制】XML文件结构
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.user.mapper.UserMapper">
+    
+    <resultMap id="BaseResultMap" type="com.example.user.entity.UserEntity">
+        <id column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="email" property="email"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+    
+    <sql id="BaseColumnList">
+        id, username, email, status, created_at, updated_at
+    </sql>
+    
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM user
+        WHERE id = #{id}
+    </select>
+    
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user (
+            username, 
+            email, 
+            password, 
+            status, 
+            created_at, 
+            updated_at
+        ) VALUES (
+            #{username}, 
+            #{email}, 
+            #{password}, 
+            #{status}, 
+            NOW(), 
+            NOW()
+        )
+    </insert>
+</mapper>
+```
+
+#### 【强制】参数传递规范
+
+| 方式 | 说明 |
+|------|------|
+| `#{param}` | 预编译参数，安全 |
+| `${param}` | 字符串替换，仅用于安全场景（如表名、排序字段） |
+| `@Param("name")` | 注解方式指定参数名 |
+
+#### 【推荐】动态SQL使用
+
+```xml
+<!-- 动态查询 -->
+<select id="selectList" resultMap="BaseResultMap">
+    SELECT <include refid="BaseColumnList"/>
+    FROM user
+    <where>
+        <if test="username != null and username != ''">
+            AND username LIKE CONCAT('%', #{username}, '%')
+        </if>
+        <if test="email != null and email != ''">
+            AND email LIKE CONCAT('%', #{email}, '%')
+        </if>
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </where>
+    ORDER BY created_at DESC
+</select>
+
+<!-- 动态更新（仅更新非空字段） -->
+<update id="updateSelective">
+    UPDATE user
+    <set>
+        <if test="username != null">username = #{username},</if>
+        <if test="email != null">email = #{email},</if>
+        <if test="status != null">status = #{status},</if>
+        updated_at = NOW()
+    </set>
+    WHERE id = #{id}
+</update>
+```
+
+---
+
+## 4. 事务管理规范
+
+### 4.1 事务注解规范
+
+#### 【强制】@Transactional使用
+
+```java
+// ✅ 正确：类级别声明事务
+@Service
+@Transactional(rollbackFor = Exception.class)
+public class UserServiceImpl implements UserService {
+    
+    @Autowired
+    private UserMapper userMapper;
+    
+    @Autowired
+    private OrderService orderService;
+    
+    @Override
+    public void createUserWithOrder(UserEntity user, OrderEntity order) {
+        userMapper.insert(user);
+        orderService.createOrder(order);
+    }
+    
+    @Override
+    @Transactional(readOnly = true)
+    public UserResponse getUserById(Long id) {
+        UserEntity userEntity = userMapper.selectById(id);
+        return UserConverter.toResponse(userEntity);
+    }
+}
+```
+
+#### 【强制】事务回滚配置
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `rollbackFor` | 指定回滚异常类型 | `RuntimeException` |
+| `noRollbackFor` | 指定不回滚异常类型 | 无 |
+| `readOnly` | 是否只读事务 | `false` |
+| `propagation` | 事务传播行为 | `REQUIRED` |
+| `isolation` | 事务隔离级别 | 数据库默认 |
+
+#### 【推荐】事务传播行为
+
+| 传播行为 | 说明 | 使用场景 |
+|---------|------|---------|
+| `REQUIRED` | 如果存在事务则加入，否则创建新事务 | 默认，大多数场景 |
+| `REQUIRES_NEW` | 始终创建新事务 | 需要独立事务的场景 |
+| `NESTED` | 嵌套事务，支持部分回滚 | 复杂业务流程 |
+| `SUPPORTS` | 如果存在事务则加入，否则以非事务方式执行 | 查询方法 |
+| `NOT_SUPPORTED` | 以非事务方式执行 | 不需要事务的操作 |
+
+#### ✅ 正确示例
+
+```java
+@Service
+public class OrderServiceImpl implements OrderService {
+    
+    @Autowired
+    private OrderMapper orderMapper;
+    
+    @Autowired
+    private PaymentService paymentService;
+    
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void createOrder(OrderEntity order) {
+        orderMapper.insert(order);
+        paymentService.processPayment(order.getId(), order.getAmount());
+    }
+    
+    @Override
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
+    public void processPayment(Long orderId, BigDecimal amount) {
+        // 独立事务处理支付
+    }
+}
+```
+
+### 4.2 事务边界规范
+
+#### 【强制】事务边界
+
+- **事务应在Service层声明**，避免在Controller层声明
+- **事务方法应尽可能短小**，减少锁持有时间
+- **避免在事务中进行远程调用**（如HTTP请求、MQ发送）
+
+#### ❌ 错误示例
+
+```java
+@RestController
+@RequestMapping("/api/orders")
+@Transactional(rollbackFor = Exception.class)  // 错误：事务不应在Controller层声明
+public class OrderController {
+    
+    @Autowired
+    private OrderService orderService;
+    
+    @PostMapping
+    public ApiResponse<Long> createOrder(@RequestBody CreateOrderRequest request) {
+        Long orderId = orderService.createOrder(request);
+        // 错误：在事务中进行远程调用
+        remoteService.notifyThirdParty(orderId);
+        return ApiResponse.success(orderId);
+    }
+}
+```
+
+### 4.3 分布式事务规范
+
+#### 【推荐】Seata分布式事务
+
+```java
+@Service
+public class OrderServiceImpl implements OrderService {
+    
+    @Autowired
+    private OrderMapper orderMapper;
+    
+    @Autowired
+    private AccountService accountService;
+    
+    @Autowired
+    private StorageService storageService;
+    
+    @Override
+    @GlobalTransactional(name = "create-order-transaction", rollbackFor = Exception.class)
+    public void createOrder(Long userId, Long productId, Integer count) {
+        storageService.decrease(productId, count);
+        accountService.decrease(userId, calculateAmount(productId, count));
+        orderMapper.insert(createOrderEntity(userId, productId, count));
+    }
+}
+```
+
+---
+
+## 5. 数据校验规范
+
+### 5.1 参数校验注解
+
+#### 【强制】校验注解使用
+
+| 注解 | 说明 | 使用场景 |
+|------|------|---------|
+| `@NotNull` | 不能为空（包括null） | 必填字段 |
+| `@NotBlank` | 不能为空字符串（包括null和空串） | 必填字符串 |
+| `@NotEmpty` | 不能为空集合 | 必填集合 |
+| `@Size(min, max)` | 长度范围 | 字符串、集合长度 |
+| `@Min(value)` | 最小值 | 数字类型 |
+| `@Max(value)` | 最大值 | 数字类型 |
+| `@Email` | 邮箱格式 | 邮箱字段 |
+| `@Pattern(regexp)` | 正则表达式 | 自定义格式 |
+
+#### ✅ 正确示例
+
+```java
+public record CreateUserRequest(
+    @NotBlank(message = "用户名不能为空")
+    @Size(min = 2, max = 50, message = "用户名长度必须在2-50之间")
+    String username,
+    
+    @NotBlank(message = "邮箱不能为空")
+    @Email(message = "邮箱格式不正确")
+    String email,
+    
+    @NotBlank(message = "密码不能为空")
+    @Size(min = 6, max = 20, message = "密码长度必须在6-20之间")
+    String password,
+    
+    @NotNull(message = "状态不能为空")
+    @Min(value = 0, message = "状态值无效")
+    @Max(value = 1, message = "状态值无效")
+    Integer status
+) {}
+```
+
+### 5.2 校验触发
+
+#### 【强制】Controller层校验
+
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+    
+    @Autowired
+    private UserService userService;
+    
+    @PostMapping
+    public ApiResponse<Long> createUser(@RequestBody @Valid CreateUserRequest request) {
+        Long userId = userService.createUser(request);
+        return ApiResponse.success(userId);
+    }
+}
+```
+
+---
+
+## 6. 数据脱敏规范
+
+### 6.1 脱敏规则
+
+#### 【强制】敏感数据脱敏
+
+| 数据类型 | 脱敏规则 | 示例 |
+|---------|---------|------|
+| **姓名** | 保留姓氏，中间用*代替 | 张** |
+| **手机号** | 保留前3位和后4位 | 138****1234 |
+| **邮箱** | 保留@前1位和域名 | t***@example.com |
+| **身份证号** | 保留前6位和后4位 | 110101****1234 |
+| **银行卡号** | 保留前4位和后4位 | 6222****1234 |
+
+#### ✅ 正确示例
+
+```java
+public final class DataMaskUtils {
+    
+    public static String maskName(String name) {
+        if (name == null || name.length() <= 1) {
+            return name;
+        }
+        return name.charAt(0) + "*".repeat(name.length() - 1);
+    }
+    
+    public static String maskPhone(String phone) {
+        if (phone == null || phone.length() != 11) {
+            return phone;
+        }
+        return phone.substring(0, 3) + "****" + phone.substring(7);
+    }
+    
+    public static String maskEmail(String email) {
+        if (email == null || !email.contains("@")) {
+            return email;
+        }
+        int atIndex = email.indexOf("@");
+        return email.charAt(0) + "***" + email.substring(atIndex);
+    }
+    
+    public static String maskIdCard(String idCard) {
+        if (idCard == null || idCard.length() < 10) {
+            return idCard;
+        }
+        return idCard.substring(0, 6) + "****" + idCard.substring(idCard.length() - 4);
+    }
+}
+```
+
+---
+
+## 7. 落地检查清单
+
+| 序号 | 检查项 | 检查方式 | 责任人 |
+|------|--------|---------|--------|
+| 1 | SQL关键字是否大写 | 检查代码 | 开发人员 |
+| 2 | 是否使用参数占位符（#{param}） | 检查代码 | 开发人员 |
+| 3 | 是否存在SELECT * | 检查代码 | 代码评审人 |
+| 4 | 是否存在字符串拼接SQL | 检查代码 | 代码评审人 |
+| 5 | WHERE/ORDER BY/JOIN字段是否有索引 | 检查SQL | DBA |
+| 6 | 分页查询是否使用主键分页 | 检查SQL | 开发人员 |
+| 7 | Mapper方法命名是否符合规范 | 检查代码 | 开发人员 |
+| 8 | 事务是否在Service层声明 | 检查代码 | 架构师 |
+| 9 | 是否使用@Valid进行参数校验 | 检查代码 | 开发人员 |
+| 10 | 敏感数据是否进行脱敏处理 | 检查代码 | 安全工程师 |
+
+---
+
+**文档结束**
+
+*本规范由架构组制定，解释权归架构组所有。*
