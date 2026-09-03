@@ -1,16 +1,18 @@
----
+***
+
 name: create-arch-design-doc
 trigger: /create-arch-design-doc <主题>
 layer: user-invoked
 description: 创建符合架构设计模板的完整文档，包含背景、方案对比、详细设计、风险评估
-invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, generate-checklist]
----
+invokes: \[check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, generate-checklist]
+------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## 执行步骤
 
 ### Step 1: 接收主题参数
 
 - 必填：`<主题>` - 架构设计的名称，如「用户服务架构设计」「分库分表方案」
+
 - 可选：业务背景描述、性能指标要求、约束条件
 
 ### Step 2: 创建文档
@@ -129,6 +131,7 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 ### Step 3: 填充内容
 
 根据设计主题：
+
 1. 第 2 章：明确 SMART 目标（Specific, Measurable, Achievable, Relevant, Time-bound）
 2. 第 3 章：至少 2 个备选方案，对比维度不少于 6 个
 3. 第 4 章：包含实际代码示例（SQL、接口定义、伪代码）
@@ -155,8 +158,9 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 
 ## 失败处理
 
-| 失败场景 | 处理方式 |
-|---------|---------|
-| 缺少具体业务背景 | 询问：请补充业务场景、QPS 指标、数据量等上下文 |
-| 详细设计缺少代码示例 | 使用伪代码占位，标注「需开发人员补充具体实现」 |
+| 失败场景          | 处理方式                        |
+| ------------- | --------------------------- |
+| 缺少具体业务背景      | 询问：请补充业务场景、QPS 指标、数据量等上下文   |
+| 详细设计缺少代码示例    | 使用伪代码占位，标注「需开发人员补充具体实现」     |
 | Mermaid 图无法绘制 | 描述架构图结构，提示用户后续补充图片到 assets/ |
+

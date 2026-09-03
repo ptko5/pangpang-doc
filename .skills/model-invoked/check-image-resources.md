@@ -1,11 +1,12 @@
----
+***
+
 name: check-image-resources
 layer: model-invoked
 description: 检查文档中引用的图片资源是否存放于标准 assets/images/ 目录，禁止引用外部图片 URL
-corresponds: ["文档书写规范 §6.3 图片与资源"]
+corresponds: \["文档书写规范 §6.3 图片与资源"]
 can-autofix: false
 severity: mandatory
----
+-------------------
 
 ## 检查规则
 
@@ -13,16 +14,19 @@ severity: mandatory
 
 Markdown 图片语法 `![alt](URL)` 中，URL 不允许是外部网络地址：
 
-| ❌ 禁止类型 | 示例 |
-|-----------|------|
-| HTTP 图片 | `![图](https://example.com/a.png)` |
-| 图床 CDN | `![图](https://cdn.jsdelivr.net/gh/user/repo/img/a.png)` |
-| 微信公众号图 | `![图](https://mmbiz.qpic.cn/...)` |
-| 协议相对路径 | `![图](//xxx.com/a.png)` |
+| ❌ 禁止类型  | 示例                                                      |
+| ------- | ------------------------------------------------------- |
+| HTTP 图片 | `![图](https://example.com/a.png)`                       |
+| 图床 CDN  | `![图](https://cdn.jsdelivr.net/gh/user/repo/img/a.png)` |
+| 微信公众号图  | `![图](https://mmbiz.qpic.cn/...)`                       |
+| 协议相对路径  | `![图](//xxx.com/a.png)`                                 |
 
 **为什么禁止？**
+
 - 外部图片随时可能 404（防盗链、图床倒闭、域名过期）
+
 - 离线阅读时无法查看
+
 - 合规风险（无法审查外部图片内容）
 
 ### R2: 图片必须引用 assets/images/ 目录下的资源（强制）
@@ -42,6 +46,7 @@ Markdown 图片语法 `![alt](URL)` 中，URL 不允许是外部网络地址：
 ### R3: 引用的图片文件必须真实存在（强制）
 
 对每个通过 R2 的图片引用：
+
 1. 基于当前文档目录 + 图片相对路径 → 解析绝对路径
 2. 检查文件是否存在
 3. 不存在 → 违规（输出「缺失图片文件」明细）
@@ -49,20 +54,27 @@ Markdown 图片语法 `![alt](URL)` 中，URL 不允许是外部网络地址：
 ### R4: 推荐图片使用 PNG / SVG 格式（推荐）
 
 非强制，但输出建议：
+
 - **架构图/流程图**：优先 SVG（矢量，缩放不模糊，可 Git diff）
+
 - **截图/照片**：PNG（无损）或 WebP（体积小）
+
 - 禁止 BMP、TIFF 等未压缩大体积格式
+
 - 单张图片建议 ≤ 500KB（过大建议压缩）
 
----
+***
 
 ## 自动修复逻辑
 
 **can-autofix = false**
 
 原因：
+
 - R1：自动下载外链图片可能失败、可能涉及版权、图片文件名需人工命名
+
 - R2：移动图片文件涉及跨目录操作，需确认不破坏其他文档引用
+
 - R3/R4：需人工补充或压缩
 
 **违规后给出的行动建议模板**：
@@ -76,7 +88,7 @@ Markdown 图片语法 `![alt](URL)` 中，URL 不允许是外部网络地址：
       ![架构图](../../assets/images/microservice-arch-v1.png)
 ```
 
----
+***
 
 ## 输出格式
 
@@ -118,3 +130,4 @@ Markdown 图片语法 `![alt](URL)` 中，URL 不允许是外部网络地址：
   "summary": "共发现3项图片资源违规，均需人工处理（下载/移动/补充图片）"
 }
 ```
+

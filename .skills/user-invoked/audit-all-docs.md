@@ -1,17 +1,20 @@
----
+***
+
 name: audit-all-docs
 trigger: /audit-all-docs
 layer: user-invoked
 description: 遍历全库所有 Markdown 文档，执行全部纪律检查，输出健康度报告与改进建议
-invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, check-cross-references, check-image-resources, generate-checklist]
----
+invokes: \[check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, check-cross-references, check-image-resources, generate-checklist]
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## 执行步骤
 
 ### Step 1: 扫描全库文档
 
 获取 `/workspace/docs/` 目录下所有 `.md` 文件列表，排除：
+
 - `node_modules/`、`.git/` 等隐藏目录
+
 - 临时文件、自动生成的文件
 
 统计总数 N。
@@ -20,26 +23,30 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 
 对每个文档，依次执行以下 Model-invoked Skills：
 
-| 序号 | Skill | 权重 | 说明 |
-|------|-------|------|------|
-| 1 | check-doc-structure | 20% | 文档头部、标题层级、结尾标记 |
-| 2 | check-markdown-format | 15% | 标题递增、代码块语言 |
-| 3 | check-chinese-typography | 15% | 中英文空格、标点 |
-| 4 | check-doc-placement | 15% | 目录归属正确性 |
-| 5 | check-content-quality | 15% | 无占位符、空章节 |
-| 6 | check-cross-references | 10% | 内部引用路径正确 |
-| 7 | check-image-resources | 10% | 图片资源规范 |
+| 序号 | Skill                    | 权重  | 说明             |
+| -- | ------------------------ | --- | -------------- |
+| 1  | check-doc-structure      | 20% | 文档头部、标题层级、结尾标记 |
+| 2  | check-markdown-format    | 15% | 标题递增、代码块语言     |
+| 3  | check-chinese-typography | 15% | 中英文空格、标点       |
+| 4  | check-doc-placement      | 15% | 目录归属正确性        |
+| 5  | check-content-quality    | 15% | 无占位符、空章节       |
+| 6  | check-cross-references   | 10% | 内部引用路径正确       |
+| 7  | check-image-resources    | 10% | 图片资源规范         |
 
 总分 = 100，每违规一项按权重扣减。
 
 ### Step 3: 执行批量检查
 
 遍历文档列表，对每个文档：
+
 1. 读取文件内容
 2. 串行执行 7 个检查 Skill
 3. 记录：
+
    - 各 Skill 结果（pass/fail + 违规数 + 自动修复数）
+
    - 文档得分（满分 100）
+
    - 具体违规明细（文件、行号、规则、描述）
 
 **输出进度**：每 10 个文档输出一次进度（如 30/150 已完成）。
@@ -131,7 +138,9 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 ### Step 6: 可选 - 执行自动批量修复
 
 询问用户：「是否对 78 项可自动修复违规执行批量修复？」
+
 - 是 → 对各文档分别执行对应的 check-xxx skill（can-autofix=true），输出修复报告
+
 - 否 → 跳过，审计结束
 
 ### Step 7: 输出审计报告文件
@@ -139,12 +148,13 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 将完整审计报告保存到：
 `/workspace/docs/05-知识管理/文档健康度审计报告-YYYYMMDD.md`
 
----
+***
 
 ## 失败处理
 
-| 失败场景 | 处理方式 |
-|---------|---------|
-| 文档总数超过 500 份 | 按目录分批审计，输出合并报告 |
-| 单个文档读取失败 | 跳过，记录到失败列表，最后汇总 |
-| 检查执行超时（>10s/文档） | 标记为跳过，不中断整体流程 |
+| 失败场景            | 处理方式            |
+| --------------- | --------------- |
+| 文档总数超过 500 份    | 按目录分批审计，输出合并报告  |
+| 单个文档读取失败        | 跳过，记录到失败列表，最后汇总 |
+| 检查执行超时（>10s/文档） | 标记为跳过，不中断整体流程   |
+

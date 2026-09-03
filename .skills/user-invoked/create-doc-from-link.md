@@ -1,10 +1,11 @@
----
+***
+
 name: create-doc-from-link
 trigger: /create-doc-from-link <url>
 layer: user-invoked
 description: 根据外部链接创建结构化文档，自动归类到正确目录，执行所有纪律检查
-invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, check-cross-references]
----
+invokes: \[check-doc-structure, check-markdown-format, check-chinese-typography, check-doc-placement, check-content-quality, check-cross-references]
+----------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## 执行步骤
 
@@ -12,33 +13,39 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 
 1. 优先使用 WebFetch 工具获取 URL 内容并转换为 Markdown
 2. 如果 WebFetch 失败（如微信公众号文章），回退到浏览器自动化：
+
    - 调用 TRAE-browseruse 技能
-   - 使用 browser_navigate 跳转 URL
-   - 使用 browser_evaluate 提取页面完整文本
+
+   - 使用 browser\_navigate 跳转 URL
+
+   - 使用 browser\_evaluate 提取页面完整文本
 3. 验证内容非空：如果内容不足 200 字，判定为获取失败
 
 ### Step 2: 分析内容类型 → 确定归属目录
 
 根据内容关键词匹配以下分类规则：
 
-| 目录 | 关键词匹配 |
-|------|-----------|
-| `03-技术笔记/新技术调研/` | 选型、对比、调研、框架、技术趋势、XX方案、优缺点分析 |
-| `03-技术笔记/架构设计/` | 架构设计、系统设计、微服务、分库分表、高并发、缓存方案、i18n、国际化 |
-| `03-技术笔记/问题排查/` | 故障、排查、调优、性能优化、线上问题、JVM、根因分析、Bug |
-| `03-技术笔记/源码阅读/` | 源码分析、源码阅读、Spring源码、框架源码、设计模式分析 |
-| `00-开发规范/` | 规范、编码标准、团队协作、命名、CR规范、Git规范 |
-| `01-环境搭建/` | 安装、配置、环境搭建、部署指南、中间件 |
-| `02-部署运维/` | 运维、Docker、K8s、CI/CD、Jenkins、监控、日志 |
-| `05-知识管理/` | 学习方法、工具、书籍、资源推荐 |
+| 目录               | 关键词匹配                                |
+| ---------------- | ------------------------------------ |
+| `03-技术笔记/新技术调研/` | 选型、对比、调研、框架、技术趋势、XX方案、优缺点分析          |
+| `03-技术笔记/架构设计/`  | 架构设计、系统设计、微服务、分库分表、高并发、缓存方案、i18n、国际化 |
+| `03-技术笔记/问题排查/`  | 故障、排查、调优、性能优化、线上问题、JVM、根因分析、Bug      |
+| `03-技术笔记/源码阅读/`  | 源码分析、源码阅读、Spring源码、框架源码、设计模式分析       |
+| `00-开发规范/`       | 规范、编码标准、团队协作、命名、CR规范、Git规范           |
+| `01-环境搭建/`       | 安装、配置、环境搭建、部署指南、中间件                  |
+| `02-部署运维/`       | 运维、Docker、K8s、CI/CD、Jenkins、监控、日志    |
+| `05-知识管理/`       | 学习方法、工具、书籍、资源推荐                      |
 
 无法匹配时：询问用户指定目录
 
 ### Step 3: 确定文档标题与文件名
 
 - 标题：从页面提取 `<title>` 或首行 H1，清理为简洁中文标题
+
 - 文件名：`标题-kebab-case化.md`，禁止空格和特殊字符
+
   - 示例：`mattpocock-skills-调研.md`
+
   - 示例：`全球化系统i18n落地方案.md`
 
 ### Step 4: 结构化文档内容
@@ -46,6 +53,7 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 根据文档类型应用对应模板骨架：
 
 **技术调研类文档骨架：**
+
 ```
 ## 1. 文档说明
 ## 2. 背景与动机
@@ -57,6 +65,7 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 ```
 
 **架构设计类文档骨架：**
+
 ```
 ## 1. 文档说明
 ## 2. 背景与目标
@@ -67,6 +76,7 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 ```
 
 **问题排查类文档骨架：**
+
 ```
 ## 1. 文档说明
 ## 2. 现象描述
@@ -95,6 +105,7 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 ### Step 7: 输出结果
 
 输出格式：
+
 ```
 ✅ 文档创建完成
 📄 路径：docs/03-技术笔记/新技术调研/xxx.md
@@ -107,9 +118,10 @@ invokes: [check-doc-structure, check-markdown-format, check-chinese-typography, 
 
 ## 失败处理
 
-| 失败场景 | 处理方式 |
-|---------|---------|
-| 链接无法访问 / 内容为空 | 提示：「无法获取链接内容，请提供备用链接或直接粘贴文本」 |
-| 内容类型无法判定 | 列出 6 类目录，询问用户选择 |
-| 纪律检查不通过（可自动修复） | 执行修复后重试，标注「已自动修复 N 项」 |
-| 纪律检查不通过（不可自动修复） | 输出违规明细 + 行号，暂停流程，待用户修改后重新执行 |
+| 失败场景            | 处理方式                         |
+| --------------- | ---------------------------- |
+| 链接无法访问 / 内容为空   | 提示：「无法获取链接内容，请提供备用链接或直接粘贴文本」 |
+| 内容类型无法判定        | 列出 6 类目录，询问用户选择              |
+| 纪律检查不通过（可自动修复）  | 执行修复后重试，标注「已自动修复 N 项」        |
+| 纪律检查不通过（不可自动修复） | 输出违规明细 + 行号，暂停流程，待用户修改后重新执行  |
+
